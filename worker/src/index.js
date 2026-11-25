@@ -247,7 +247,14 @@ export default {
     if (url.pathname === CLIENT_JS) {
       const response = await localAsset(request, env, "/js/tiktok-client.js");
       const source = await response.text();
-      return new Response(source.replaceAll('"/tiktok', '"/relay').replaceAll("'/tiktok", "'/relay"), {
+      const workerSource = source
+        .replaceAll('"/tiktok', '"/relay')
+        .replaceAll("'/tiktok", "'/relay")
+        .replace(
+          'if (selfPath === BASE || selfPath.indexOf(BASE + "/") === 0) {',
+          'if (abs.pathname.indexOf(BASE + "/p/") === 0) return raw;\n           if (selfPath === BASE || selfPath.indexOf(BASE + "/") === 0) {',
+        );
+      return new Response(workerSource, {
         status: response.status,
         headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-store" },
       });
