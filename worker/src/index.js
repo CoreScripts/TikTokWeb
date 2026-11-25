@@ -130,12 +130,14 @@ async function proxyHttp(request, target, referer) {
   const contentType = upstream.headers.get("content-type") || "";
   if (contentType.includes("text/") || contentType.includes("javascript") || contentType.includes("json")) {
     let text = await upstream.text();
+    text = rewriteText(text, request, referer || target.href);
     if (contentType.includes("text/html")) {
-      text = text.replace(/<head(\s[^>]*)?>/i, (tag) => `${tag}<script src="${CLIENT_JS}"></script>`);
+      const targetScript = `<script>window.__TT_TARGET__=${JSON.stringify(target.href).replace(/</g, "\\u003c")};</script>`;
+      text = text.replace(/<head(\s[^>]*)?>/i, (tag) => `${tag}${targetScript}<script src="${CLIENT_JS}"></script>`);
     }
     headers.delete("content-encoding");
     headers.delete("content-length");
-    return new Response(rewriteText(text, request, referer || target.href), {
+    return new Response(text, {
       status: upstream.status,
       headers,
     });
