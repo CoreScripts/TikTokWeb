@@ -130,8 +130,13 @@ async function proxyHttp(request, target, referer) {
   const contentType = upstream.headers.get("content-type") || "";
   if (contentType.includes("text/") || contentType.includes("javascript") || contentType.includes("json")) {
     let text = await upstream.text();
-    text = rewriteText(text, request, referer || target.href);
-    if (contentType.includes("text/html")) {
+    const sample = text.trimStart();
+    const isJson = contentType.includes("json") ||
+      (contentType.includes("text/plain") && (sample.startsWith("{") || sample.startsWith("[")));
+    const isHtml = contentType.includes("text/html") ||
+      (contentType.includes("text/plain") && /^(?:<!doctype\s+html|<html[\s>])/i.test(sample));
+    if (!isJson) text = rewriteText(text, request, referer || target.href);
+    if (isHtml) {
       const targetScript = `<script>window.__TT_TARGET__=${JSON.stringify(target.href).replace(/</g, "\\u003c")};</script>`;
       text = text.replace(/<head(\s[^>]*)?>/i, (tag) => `${tag}${targetScript}<script src="${CLIENT_JS}"></script>`);
     }
