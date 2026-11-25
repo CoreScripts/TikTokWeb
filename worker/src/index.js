@@ -25,6 +25,26 @@ function gatewayUrl(request, target, referer = target) {
   return `${base}${GATE}?url=${encodeURIComponent(target)}&referer=${encodeURIComponent(referer)}&tt=1`;
 }
 
+function contextualUrl(request, target) {
+  const base = new URL(request.url).origin;
+  return `${base}${BASE}/p/${encodeURIComponent(target.origin)}${target.pathname}${target.search}`;
+}
+
+function contextTarget(requestUrl) {
+  const prefix = `${BASE}/p/`;
+  if (!requestUrl.pathname.startsWith(prefix)) return null;
+  const rest = requestUrl.pathname.slice(prefix.length);
+  const slash = rest.indexOf("/");
+  if (slash < 1) return null;
+  let origin;
+  try {
+    origin = decodeURIComponent(rest.slice(0, slash));
+  } catch {
+    return null;
+  }
+  return safeTarget(origin + rest.slice(slash) + requestUrl.search);
+}
+
 function safeTarget(raw, fallbackPath = "/") {
   let target;
   try {
@@ -92,6 +112,20 @@ function rewriteText(text, request, referer) {
     });
 }
 
+function rewriteHtml(text, request, referer) {
+  const attrs = /(<(?:script|link)\b[^>]*\b(?:src|href)\s*=\s*)(["'])(https?:\/\/[^"']+)\2/gi;
+  const contextual = text.replace(attrs, (match, lead, quote, raw) => {
+    try {
+      const target = new URL(raw);
+      if (allowedHost(target.hostname)) return `${lead}${quote}${contextualUrl(request, target)}${quote}`;
+    } catch {
+      /* leave malformed or external URLs unchanged */
+    }
+    return match;
+  });
+  return rewriteText(contextual, request, referer);
+}
+
 function responseHeaders(upstream, request, target) {
   const headers = new Headers();
   for (const name of [
@@ -135,7 +169,8 @@ async function proxyHttp(request, target, referer) {
       (contentType.includes("text/plain") && (sample.startsWith("{") || sample.startsWith("[")));
     const isHtml = contentType.includes("text/html") ||
       (contentType.includes("text/plain") && /^(?:<!doctype\s+html|<html[\s>])/i.test(sample));
-    if (!isJson) text = rewriteText(text, request, referer || target.href);
+    if (isHtml) text = rewriteHtml(text, request, referer || target.href);
+    else if (!isJson) text = rewriteText(text, request, referer || target.href);
     if (isHtml) {
       const targetScript = `<script>window.__TT_TARGET__=${JSON.stringify(target.href).replace(/</g, "\\u003c")};</script>`;
       text = text.replace(/<head(\s[^>]*)?>/i, (tag) => `${tag}${targetScript}<script src="${CLIENT_JS}"></script>`);
@@ -231,7 +266,8 @@ export default {
     const upstreamPath = url.pathname.startsWith(BASE)
       ? url.pathname.slice(BASE.length) || "/"
       : url.pathname;
-    const target = safeTarget(url.pathname === GATE ? url.searchParams.get("url") : "", url.pathname === GATE ? "/" : upstreamPath);
+    const contextualTarget = contextTarget(url);
+    const target = contextualTarget || safeTarget(url.pathname === GATE ? url.searchParams.get("url") : "", url.pathname === GATE ? "/" : upstreamPath);
     if (!target) return new Response("TikTok target not allowed", { status: 403 });
     const referer = url.searchParams.get("referer") || target.href;
     return proxyHttp(request, target, referer);
